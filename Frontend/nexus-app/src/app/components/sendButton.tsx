@@ -7,7 +7,7 @@ interface ButtonProps{
 function SendButton({prompt,Model}:ButtonProps){
     async function promptResponse(){
         try
-        {const response = await fetch(`http://127.0.0.1:8000/geminiResponse/${Model}`,{
+        {const response = await fetch(`http://127.0.0.1:8000/ChatResponse/${Model}`,{
             method:'POST',
             headers:{
                 "Content-Type":"application/json",

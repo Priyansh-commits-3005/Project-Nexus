@@ -1,13 +1,17 @@
 "use client";//this tells that this is a client component and not a server component
 import SendButton from "./components/sendButton"
 import InputBox from "./components/inputText"
+import Dropdown from "./components/dropdown"
 import { useState } from "react";
 
 
 export default function Landing(){
 
   const[prompt,setPrompt] = useState("");
-  const Model = "gemini-2.0-flash";
+  const[messages,setMessages] = useState([]);
+  
+  const [model,setModel] = useState('Gemini');
+  const modelOptions = ['Gemini', 'DeepSeek'];
 
   return(
     <main>
@@ -22,7 +26,15 @@ export default function Landing(){
           setPrompt={setPrompt}
           />
         </div>
-        <div><SendButton prompt = {prompt} Model= {Model}/></div>
+        <div>
+          <Dropdown 
+            selectedModel={model}
+            setSelectedModel={setModel}
+            options={modelOptions}
+            label="Select AI Model"
+          />
+        </div>
+        <div><SendButton prompt = {prompt} Model= {model}/></div>
       </div>
     </main>
   );

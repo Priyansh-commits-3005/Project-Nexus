@@ -14,6 +14,7 @@ nexus = FastAPI()
 class PromptInput(BaseModel):
     prompt:str
 
+
 origins = [
     "http://localhost:3000",
 ]
@@ -27,13 +28,19 @@ nexus.add_middleware(
 
 )
 
+
+
 @nexus.get("/")
 # initial function for setting up fastapi
 def initialize():
     return {"Hello":"World"}
 
-@nexus.post("/geminiResponse/{model_tag}")
+@nexus.post("/ChatResponse/{model_tag}")
 # this gives responses of gemini for query params for the content and the path params for model
-def geminiResponse(model_tag:str , prompt:PromptInput):
-    return{"Gemini Response":BF.generateResponseGemini(model_tag,prompt.prompt)}
+def chatResponse(model_tag:str , prompt:PromptInput):
+    if(model_tag == "Gemini"):
+        return{"Gemini Response":BF.generateResponseGemini(model_tag,prompt.prompt)}
+    else:
+        return{"Deepseek Response":BF.generateResponseOllama(model=model_tag,prompt=prompt.prompt)}
+
 
