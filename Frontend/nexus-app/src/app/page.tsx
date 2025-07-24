@@ -6,7 +6,8 @@ import { useState } from "react";
 
 export default function Landing(){
 
-  const[prompt,setPrompt] = useState("Enter Prompt");
+  const[prompt,setPrompt] = useState("");
+  const Model = "gemini-2.0-flash";
 
   return(
     <main>
@@ -21,7 +22,7 @@ export default function Landing(){
           setPrompt={setPrompt}
           />
         </div>
-        <div><SendButton prompt = {prompt} /></div>
+        <div><SendButton prompt = {prompt} Model= {Model}/></div>
       </div>
     </main>
   );
