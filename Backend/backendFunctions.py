@@ -28,7 +28,7 @@ Model              RPM     TPM      RPD
 
 Gemini 2.0 Flash	15	1,000,000	200
 """
-def generateResponseGemini(model: str , contents : str)->str:
+def generateResponseGemini(model: str , contents : str,conversation_history: list = None)->str:
     model = modelDict[model]
     response = nexusGeminiClient.models.generate_content(
         
@@ -39,7 +39,7 @@ def generateResponseGemini(model: str , contents : str)->str:
     )
     return response.text
 
-def generateResponseOllama(model:str,prompt:str):
+def generateResponseOllama(model:str,prompt:str,conversation_history: list = None):
     model = modelDict[model]
     response = nexusOllamaClient.generate(model=model,prompt=prompt)
     return response.response

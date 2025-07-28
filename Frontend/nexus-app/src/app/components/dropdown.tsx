@@ -23,7 +23,7 @@ function Dropdown({ selectedModel, setSelectedModel, options, label }: DropdownP
     return (
         <div className="relative inline-block text-left">
             {label && (
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
                     {label}
                 </label>
             )}
@@ -31,7 +31,7 @@ function Dropdown({ selectedModel, setSelectedModel, options, label }: DropdownP
             <div>
                 <button
                     type="button"
-                    className="inline-flex w-full justify-between items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-gray-100"
+                    className="inline-flex w-full justify-between items-center rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 shadow-sm hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-gray-100 dark:focus:ring-offset-gray-800"
                     onClick={toggleDropdown}
                     aria-expanded={isOpen}
                     aria-haspopup="true"
@@ -56,15 +56,15 @@ function Dropdown({ selectedModel, setSelectedModel, options, label }: DropdownP
             </div>
 
             {isOpen && (
-                <div className="absolute right-0 z-10 mt-2 w-full origin-top-right rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
+                <div className="absolute right-0 z-10 mt-2 w-full origin-top-right rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black dark:ring-gray-600 ring-opacity-5 focus:outline-none">
                     <div className="py-1" role="menu" aria-orientation="vertical">
                         {options.map((option, index) => (
                             <button
                                 key={index}
-                                className={`block w-full px-4 py-2 text-left text-sm hover:bg-gray-100 focus:bg-gray-100 focus:outline-none ${
+                                className={`block w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 focus:bg-gray-100 dark:focus:bg-gray-700 focus:outline-none ${
                                     selectedModel === option
-                                        ? 'bg-violet-50 text-violet-900'
-                                        : 'text-gray-700'
+                                        ? 'bg-violet-50 dark:bg-violet-900/20 text-violet-900 dark:text-violet-300'
+                                        : 'text-gray-700 dark:text-gray-200'
                                 }`}
                                 role="menuitem"
                                 onClick={() => handleOptionClick(option)}
