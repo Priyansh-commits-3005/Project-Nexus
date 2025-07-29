@@ -8,6 +8,8 @@ from google.genai import types
 import os
 from dotenv import load_dotenv , dotenv_values
 import ollama
+from langchain.prompts import ChatPromptTemplate
+
 
 # loading the environmental variables
 load_dotenv()

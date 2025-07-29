@@ -22,12 +22,19 @@ export default function ThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    console.log('Theme changed to:', theme);
     localStorage.setItem("nexus_theme", theme);
     document.documentElement.classList.toggle("dark", theme === "dark");
+    console.log('HTML class list:', document.documentElement.classList.toString());
   }, [theme]);
 
   const toggleTheme = () => {
-    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+    console.log('Toggle theme called, current theme:', theme);
+    setTheme((prev) => {
+      const newTheme = prev === "dark" ? "light" : "dark";
+      console.log('Switching from', prev, 'to', newTheme);
+      return newTheme;
+    });
   };
 
   return (
