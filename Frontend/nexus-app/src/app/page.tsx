@@ -28,18 +28,33 @@ interface Conversation {
 export default function Landing() {
     const { theme, toggleTheme } = useContext(ThemeContext);
     const [prompt, setPrompt] = useState("");
-    const [conversations, setConversations] = useState<Conversation[]>(() => {
-        if (typeof window !== 'undefined') {
-            const saved = localStorage.getItem('nexus_conversations');
-            return saved ? JSON.parse(saved) : [];
-        }
-        return [];
-    });
+    const [conversations, setConversations] = useState<Conversation[]>([]);
     const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
     const [model, setModel] = useState('Gemini');
     const [isLoading, setIsLoading] = useState(false);
     const [isThinking, setIsThinking] = useState(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    const [isHydrated, setIsHydrated] = useState(false);
+    
+    // Load conversations after hydration
+    useEffect(() => {
+        const saved = localStorage.getItem('nexus_conversations');
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            // Convert date strings back to Date objects
+            const convertedConversations = parsed.map((conv: any) => ({
+                ...conv,
+                createdAt: new Date(conv.createdAt),
+                lastActivity: new Date(conv.lastActivity),
+                messages: conv.messages.map((msg: any) => ({
+                    ...msg,
+                    timestamp: new Date(msg.timestamp)
+                }))
+            }));
+            setConversations(convertedConversations);
+        }
+        setIsHydrated(true);
+    }, []);
     
     const modelOptions = ['Gemini', 'DeepSeek'];
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -257,13 +272,15 @@ export default function Landing() {
             <div className={`fixed lg:relative lg:translate-x-0 transition-transform duration-300 ease-in-out z-50 ${
                 isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
             }`}>
-                <Sidebar 
-                    conversations={conversations}
-                    activeConversationId={activeConversationId}
-                    onNewChat={handleNewChat}
-                    onConversationSelect={handleConversationSelect}
-                    onDeleteConversation={handleDeleteConversation}
-                />
+                {isHydrated && (
+                    <Sidebar 
+                        conversations={conversations}
+                        activeConversationId={activeConversationId}
+                        onNewChat={handleNewChat}
+                        onConversationSelect={handleConversationSelect}
+                        onDeleteConversation={handleDeleteConversation}
+                    />
+                )}
             </div>
 
             {/* Main Chat Area */}

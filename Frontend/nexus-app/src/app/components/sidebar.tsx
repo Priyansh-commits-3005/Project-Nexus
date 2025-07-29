@@ -19,14 +19,16 @@ interface SidebarProps {
 
 function Sidebar({ conversations, activeConversationId, onNewChat, onConversationSelect, onDeleteConversation }: SidebarProps) {
     const formatDate = (date: Date) => {
+        // Ensure date is a Date object
+        const dateObj = date instanceof Date ? date : new Date(date);
         const now = new Date();
-        const diffTime = Math.abs(now.getTime() - date.getTime());
+        const diffTime = Math.abs(now.getTime() - dateObj.getTime());
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         
         if (diffDays === 1) return 'Today';
         if (diffDays === 2) return 'Yesterday';
         if (diffDays <= 7) return `${diffDays - 1} days ago`;
-        return date.toLocaleDateString();
+        return dateObj.toLocaleDateString();
     };
 
     return (

@@ -11,30 +11,27 @@ export const ThemeContext = createContext<ThemeContextProps>({
   toggleTheme: () => {},
 });
 
-export default function ThemeProvider({ children }: { children: ReactNode }) {
+function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<"light" | "dark">("dark");
+  const [isHydrated, setIsHydrated] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem("nexus_theme");
     if (stored === "light" || stored === "dark") {
       setTheme(stored);
     }
+    setIsHydrated(true);
   }, []);
 
   useEffect(() => {
-    console.log('Theme changed to:', theme);
-    localStorage.setItem("nexus_theme", theme);
-    document.documentElement.classList.toggle("dark", theme === "dark");
-    console.log('HTML class list:', document.documentElement.classList.toString());
-  }, [theme]);
+    if (isHydrated) {
+      localStorage.setItem("nexus_theme", theme);
+      document.documentElement.classList.toggle("dark", theme === "dark");
+    }
+  }, [theme, isHydrated]);
 
   const toggleTheme = () => {
-    console.log('Toggle theme called, current theme:', theme);
-    setTheme((prev) => {
-      const newTheme = prev === "dark" ? "light" : "dark";
-      console.log('Switching from', prev, 'to', newTheme);
-      return newTheme;
-    });
+    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
   };
 
   return (
@@ -43,3 +40,5 @@ export default function ThemeProvider({ children }: { children: ReactNode }) {
     </ThemeContext.Provider>
   );
 }
+
+export default ThemeProvider;

@@ -19,6 +19,8 @@ class PromptInput(BaseModel):
 
 origins = [
     "http://localhost:3000",
+    "http://localhost",
+    "http://localhost:3001"
 ]
 
 nexus.add_middleware(
