@@ -140,16 +140,6 @@ export default function Landing() {
         }
 
         try {
-            // Get current conversation messages for context
-            const currentConv = conversations.find(conv => conv.id === currentConversationId);
-            const conversationHistory = currentConv ? [...currentConv.messages, userMessage] : [userMessage];
-            
-            // Prepare conversation context for AI
-            const historyForAPI = conversationHistory.map(msg => ({
-                role: msg.role === 'user' ? 'user' : 'assistant',
-                content: msg.content
-            }));
-
             const response = await fetch(`http://127.0.0.1:8000/ChatResponse/${model}`, {
                 method: 'POST',
                 headers: {
@@ -157,8 +147,8 @@ export default function Landing() {
                 },
                 body: JSON.stringify({ 
                     prompt: currentPrompt,
-                    conversation_history: historyForAPI
-                }),
+                    thread_id: currentConversationId
+                })
             });
 
             if (!response.ok) {
@@ -171,10 +161,10 @@ export default function Landing() {
             let aiContent = '';
             let thinkingContent = '';
             
-            if (model === 'Gemini' && data['Gemini Response']) {
-                aiContent = data['Gemini Response'];
-            } else if (model === 'DeepSeek' && data['Deepseek Response']) {
-                const responseText = data['Deepseek Response'];
+            if (model === 'Gemini' && data['Gemini_response']) {
+                aiContent = data['Gemini_response'];
+            } else if (model === 'DeepSeek' && data['DeepSeek_response']) {
+                const responseText = data['DeepSeek_response'];
                 
                 // Check if the response contains thinking tags
                 const thinkingMatch = responseText.match(/<think>([\s\S]*?)<\/think>/);

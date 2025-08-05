@@ -8,13 +8,27 @@ import backendFunctions as BF
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
+import asyncio
+from contextlib import asynccontextmanager
+from langchain_core.messages import HumanMessage,SystemMessage  
+from logging import Logger
 
-nexus = FastAPI()
+
+@asynccontextmanager
+async def lifespan(nexus : FastAPI):
+    global NEXUS_APP
+    async with BF.AsyncSqliteSaver.from_conn_string("checkpoints.db") as memory:
+        NEXUS_APP = BF.nexusGraphBuilder.compile(checkpointer=memory)
+        yield
+    
+    
+
+nexus = FastAPI(lifespan= lifespan)
 
 # prompt class
 class PromptInput(BaseModel):
     prompt:str
-    conversation_history : Optional[list[dict[str,str]]] = []
+    thread_id:str
 
 
 origins = [
@@ -40,11 +54,21 @@ def initialize():
     return {"Hello":"World"}
 
 @nexus.post("/ChatResponse/{model_tag}")
-# this gives responses of gemini for query params for the content and the path params for model
-def chatResponse(model_tag:str , prompt:PromptInput):
-    if(model_tag == "Gemini"):
-        return{"Gemini Response":BF.generateResponseGemini(model_tag,prompt.prompt,prompt.conversation_history)}
-    else:
-        return{"Deepseek Response":BF.generateResponseOllama(model=model_tag,prompt=prompt.prompt,conversation_history=prompt.conversation_history)}
+# this gives enhanced outputs of model with memory
+async def chatResponse(model_tag:str , prompt:PromptInput):
+    config = {"configurable":{"thread_id":f"thread_{prompt.thread_id}","model":f"{model_tag}"}}
+    input_messages = [HumanMessage(content=prompt.prompt)]
+    
+    response = await NEXUS_APP.ainvoke(input= {"messages" : input_messages} , config = config)
+    
+    # Get only the LATEST AI message (last one in the list)
+    latest_ai_message = None
+    for message in reversed(response['messages']):
+        if hasattr(message, 'content') and message.__class__.__name__ == 'AIMessage':
+            latest_ai_message = message.content
+            break
+    
+    return {f"{model_tag}_response": latest_ai_message or "No response generated"}
+    
 
 
