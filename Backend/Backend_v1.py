@@ -12,6 +12,8 @@ import asyncio
 from contextlib import asynccontextmanager
 from langchain_core.messages import HumanMessage,SystemMessage  
 from logging import Logger
+from fastapi.responses import StreamingResponse
+
 
 
 @asynccontextmanager
@@ -59,16 +61,17 @@ async def chatResponse(model_tag:str , prompt:PromptInput):
     config = {"configurable":{"thread_id":f"thread_{prompt.thread_id}","model":f"{model_tag}"}}
     input_messages = [HumanMessage(content=prompt.prompt)]
     
-    response = await NEXUS_APP.ainvoke(input= {"messages" : input_messages} , config = config)
+    # Get the complete response from the graph
+    result = await NEXUS_APP.ainvoke(input= {"messages" : input_messages} , config = config)
     
-    # Get only the LATEST AI message (last one in the list)
-    latest_ai_message = None
-    for message in reversed(response['messages']):
-        if hasattr(message, 'content') and message.__class__.__name__ == 'AIMessage':
-            latest_ai_message = message.content
-            break
+    # Extract the AI message content
+    if 'messages' in result and result['messages']:
+        ai_message = result['messages'][-1]
+        if hasattr(ai_message, 'content'):
+            return {"response": ai_message.content}
     
-    return {f"{model_tag}_response": latest_ai_message or "No response generated"}
-    
+    # Fallback response
+    return {"response": "Sorry, I couldn't process your request."}
 
-
+if __name__ == "__main__":
+    uvicorn.run(nexus, host="127.0.0.1", port=8000, reload=True)

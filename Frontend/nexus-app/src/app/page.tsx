@@ -155,28 +155,21 @@ export default function Landing() {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
 
+            // Handle simple JSON response instead of streaming
             const data = await response.json();
-            
-            // Extract the AI response based on the model
-            let aiContent = '';
+            let aiContent = data.response || 'Sorry, I couldn\'t process your request.';
+
+            // Process the complete response for thinking content (DeepSeek)
             let thinkingContent = '';
             
-            if (model === 'Gemini' && data['Gemini_response']) {
-                aiContent = data['Gemini_response'];
-            } else if (model === 'DeepSeek' && data['DeepSeek_response']) {
-                const responseText = data['DeepSeek_response'];
-                
+            if (model === 'DeepSeek' && aiContent) {
                 // Check if the response contains thinking tags
-                const thinkingMatch = responseText.match(/<think>([\s\S]*?)<\/think>/);
+                const thinkingMatch = aiContent.match(/<think>([\s\S]*?)<\/think>/);
                 if (thinkingMatch) {
                     thinkingContent = thinkingMatch[1].trim();
                     // Remove thinking tags from the main content
-                    aiContent = responseText.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-                } else {
-                    aiContent = responseText;
+                    aiContent = aiContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
                 }
-            } else {
-                aiContent = 'Sorry, I couldn\'t process your request.';
             }
 
             const aiMessage: Message = {
