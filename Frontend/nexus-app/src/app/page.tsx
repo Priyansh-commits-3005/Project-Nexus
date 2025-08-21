@@ -14,6 +14,7 @@ interface Message {
     timestamp: Date;
     isThinking?: boolean;
     thinkingContent?: string;
+    isStreaming?: boolean;
 }
 
 interface Conversation {
@@ -33,10 +34,12 @@ export default function Landing() {
     const [model, setModel] = useState('Gemini');
     const [isLoading, setIsLoading] = useState(false);
     const [isThinking, setIsThinking] = useState(false);
+    const [isStreaming, setIsStreaming] = useState(false);
+    const [wsConnectionStatus, setWsConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'failed'>('disconnected');
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [isHydrated, setIsHydrated] = useState(false);
     
-    // Load conversations after hydration
+    // Load conversations and thinking preference after hydration
     useEffect(() => {
         const saved = localStorage.getItem('nexus_conversations');
         if (saved) {
@@ -53,6 +56,7 @@ export default function Landing() {
             }));
             setConversations(convertedConversations);
         }
+        
         setIsHydrated(true);
     }, []);
     
@@ -82,10 +86,11 @@ export default function Landing() {
         return currentConv ? currentConv.messages : [];
     };
 
-    // Persist conversations
+    // Persist conversations and thinking preference
     useEffect(() => {
         localStorage.setItem('nexus_conversations', JSON.stringify(conversations));
     }, [conversations]);
+    
     // Auto-scroll to bottom when new messages are added
     useEffect(() => {
         if (messagesEndRef.current) {
@@ -94,7 +99,15 @@ export default function Landing() {
     }, [getCurrentMessages().length]);
 
     const handleSend = async () => {
-        if (!prompt.trim() || isLoading) return;
+        if (!prompt.trim() || isLoading || isStreaming || isThinking) {
+            console.log('Send blocked:', { 
+                hasPrompt: !!prompt.trim(), 
+                isLoading, 
+                isStreaming, 
+                isThinking 
+            });
+            return;
+        }
 
         const userMessage: Message = {
             role: 'user',
@@ -134,48 +147,393 @@ export default function Landing() {
         setPrompt("");
         setIsLoading(true);
 
-        // For DeepSeek model, show thinking state
-        if (model === 'DeepSeek') {
-            setIsThinking(true);
-        }
-
+        // We'll let the streaming logic determine if thinking is shown based on actual content
+        
+        // Try WebSocket first, fallback to HTTP if it fails
         try {
-            const response = await fetch(`http://127.0.0.1:8000/ChatResponse/${model}`, {
+            await handleWebSocketSend(currentConversationId, currentPrompt, model);
+        } catch (wsError) {
+            console.log('WebSocket failed, falling back to HTTP:', wsError);
+            // Only fallback if we're still in a loading state (haven't been reset)
+            if (isLoading) {
+                await handleHttpSend(currentConversationId, currentPrompt, model);
+            }
+        } finally {
+            // Ensure all states are properly reset regardless of success/failure
+            setIsLoading(false);
+            setIsThinking(false);
+            setIsStreaming(false);
+        }
+    };
+
+    const handleWebSocketSend = async (conversationId: string, userPrompt: string, selectedModel: string) => {
+        return new Promise((resolve, reject) => {
+            try {
+                // Create WebSocket connection
+                setWsConnectionStatus('connecting');
+                const ws = new WebSocket(`ws://127.0.0.1:8000/ws/${conversationId}/${selectedModel}`);
+                let wsConnected = false;
+                let streamedContent = '';
+                let thinkingContent = '';
+                let responseTimeout: NodeJS.Timeout;
+                
+                // Create placeholder AI message for streaming
+                const placeholderAiMessage: Message = {
+                    role: 'ai',
+                    content: '',
+                    model: selectedModel,
+                    timestamp: new Date(),
+                    isThinking: false, // Will be updated dynamically if thinking content is found
+                    thinkingContent: '',
+                    isStreaming: true
+                };
+
+                // Add placeholder message
+                setConversations(prev => prev.map(conv => 
+                    conv.id === conversationId 
+                        ? { 
+                            ...conv, 
+                            messages: [...conv.messages, placeholderAiMessage],
+                            lastActivity: new Date()
+                        }
+                        : conv
+                ));
+
+                ws.onopen = () => {
+                    console.log('WebSocket connected');
+                    wsConnected = true;
+                    setWsConnectionStatus('connected');
+                    setIsStreaming(true);
+                    ws.send(userPrompt);
+                    
+                    // Set response timeout (2 minutes)
+                    responseTimeout = setTimeout(() => {
+                        console.log('WebSocket response timeout');
+                        ws.close();
+                        setConversations(prev => prev.map(conv => 
+                            conv.id === conversationId 
+                                ? { 
+                                    ...conv, 
+                                    messages: conv.messages.map((msg, index) => 
+                                        index === conv.messages.length - 1 
+                                            ? { 
+                                                ...msg, 
+                                                content: 'Request timed out. The AI took too long to respond. Please try again.',
+                                                isStreaming: false,
+                                                isThinking: false
+                                            }
+                                            : msg
+                                    )
+                                }
+                                : conv
+                        ));
+                    }, 120000); // 2 minutes timeout
+                };
+
+                ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        
+                        if (data.token) {
+                            // Clear response timeout since we got a response
+                            if (responseTimeout) {
+                                clearTimeout(responseTimeout);
+                            }
+                            
+                            // Handle true incremental streaming - accumulate tokens
+                            streamedContent += data.token; // Append each token to build the complete response
+                            
+                            // Check for thinking content in both DeepSeek and Gemini
+                            let displayContent = streamedContent;
+                            let currentThinkingContent = thinkingContent;
+                            let hasDetectedThinking = false;
+                            
+                            if (streamedContent) {
+                                // Both DeepSeek and Gemini now use <think> tags
+                                const thinkingMatch = streamedContent.match(/<think>([\s\S]*?)<\/think>/);
+                                if (thinkingMatch) {
+                                    hasDetectedThinking = true;
+                                    currentThinkingContent = thinkingMatch[1].trim();
+                                    displayContent = streamedContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+                                } else if (streamedContent.includes('<think>')) {
+                                    // Thinking has started but not completed yet
+                                    hasDetectedThinking = true;
+                                    const startMatch = streamedContent.match(/<think>([\s\S]*?)$/);
+                                    if (startMatch) {
+                                        currentThinkingContent = startMatch[1].trim() + '...';
+                                        displayContent = streamedContent.replace(/<think>[\s\S]*?$/, '').trim();
+                                    }
+                                }
+                                
+                                // Update thinking content if it changed or was detected
+                                if (currentThinkingContent !== thinkingContent || hasDetectedThinking) {
+                                    thinkingContent = currentThinkingContent;
+                                }
+                            }
+                            
+                            // Update the streaming content in the last message
+                            setConversations(prev => prev.map(conv => 
+                                conv.id === conversationId 
+                                    ? { 
+                                        ...conv, 
+                                        messages: conv.messages.map((msg, index) => 
+                                            index === conv.messages.length - 1 
+                                                ? { 
+                                                    ...msg, 
+                                                    content: displayContent,
+                                                    isThinking: !!currentThinkingContent && !displayContent.trim(),
+                                                    isStreaming: true,
+                                                    thinkingContent: currentThinkingContent || msg.thinkingContent
+                                                }
+                                                : msg
+                                        )
+                                    }
+                                    : conv
+                            ));
+                            
+                            // Set a timeout to close connection if no more tokens arrive
+                            // This helps handle cases where the backend doesn't close the WebSocket
+                            if (responseTimeout) {
+                                clearTimeout(responseTimeout);
+                            }
+                            responseTimeout = setTimeout(() => {
+                                if (ws.readyState === WebSocket.OPEN) {
+                                    console.log('Auto-closing WebSocket due to inactivity');
+                                    ws.close();
+                                }
+                            }, 3000); // Close after 3 seconds of no tokens
+                            
+                        } else {
+                            console.warn('Received WebSocket message without token:', data);
+                        }
+                    } catch (parseError) {
+                        console.error('Error parsing WebSocket message:', parseError, 'Raw data:', event.data);
+                        
+                        // If we can't parse the message, show an error
+                        setConversations(prev => prev.map(conv => 
+                            conv.id === conversationId 
+                                ? { 
+                                    ...conv, 
+                                    messages: conv.messages.map((msg, index) => 
+                                        index === conv.messages.length - 1 
+                                            ? { 
+                                                ...msg, 
+                                                content: 'Sorry, I received an invalid response format. Please try again.',
+                                                isStreaming: false,
+                                                isThinking: false
+                                            }
+                                            : msg
+                                    )
+                                }
+                                : conv
+                        ));
+                        
+                        ws.close();
+                    }
+                };
+
+                ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    
+                    // Clear any timeouts
+                    if (responseTimeout) {
+                        clearTimeout(responseTimeout);
+                    }
+                    
+                    // Reset all loading states on error
+                    setIsLoading(false);
+                    setIsThinking(false);
+                    setIsStreaming(false);
+                    setWsConnectionStatus('failed');
+                    
+                    if (!wsConnected) {
+                        reject(new Error('WebSocket connection failed'));
+                    } else {
+                        // If we were connected but got an error, show error in the message
+                        setConversations(prev => prev.map(conv => 
+                            conv.id === conversationId 
+                                ? { 
+                                    ...conv, 
+                                    messages: conv.messages.map((msg, index) => 
+                                        index === conv.messages.length - 1 
+                                            ? { 
+                                                ...msg, 
+                                                content: 'Sorry, I encountered a connection error while processing your request. Please try again.',
+                                                isThinking: false,
+                                                isStreaming: false
+                                            }
+                                            : msg
+                                    )
+                                }
+                                : conv
+                        ));
+                        resolve(''); // Resolve to prevent fallback to HTTP
+                    }
+                };
+
+                ws.onclose = (event) => {
+                    console.log('WebSocket connection closed:', event.code, event.reason);
+                    
+                    // Clear any timeouts
+                    if (responseTimeout) {
+                        clearTimeout(responseTimeout);
+                    }
+                    
+                    // Always reset loading states when WebSocket closes
+                    setIsLoading(false);
+                    setIsThinking(false);
+                    setIsStreaming(false);
+                    setWsConnectionStatus('disconnected');
+                    
+                    // Finalize the message - mark streaming as complete
+                    setConversations(prev => prev.map(conv => 
+                        conv.id === conversationId 
+                            ? { 
+                                ...conv, 
+                                messages: conv.messages.map((msg, index) => 
+                                    index === conv.messages.length - 1 
+                                        ? { 
+                                            ...msg, 
+                                            isStreaming: false,
+                                            isThinking: false
+                                        }
+                                        : msg
+                                )
+                            }
+                            : conv
+                    ));
+                    
+                    // Check if we received any content
+                    if (wsConnected) {
+                        if (streamedContent && streamedContent.trim()) {
+                            // Successfully received content
+                            console.log('WebSocket completed successfully with content:', streamedContent.length, 'characters');
+                            resolve(streamedContent);
+                        } else {
+                            // Connected but no meaningful content received
+                            console.log('WebSocket completed but no content received');
+                            
+                            // Update the last message with error
+                            setConversations(prev => prev.map(conv => 
+                                conv.id === conversationId 
+                                    ? { 
+                                        ...conv, 
+                                        messages: conv.messages.map((msg, index) => 
+                                            index === conv.messages.length - 1 
+                                                ? { 
+                                                    ...msg, 
+                                                    content: 'Sorry, no response was received. Please try again.',
+                                                    isStreaming: false,
+                                                    isThinking: false
+                                                }
+                                                : msg
+                                        )
+                                    }
+                                    : conv
+                            ));
+                            
+                            reject(new Error('No content received from AI'));
+                        }
+                    } else {
+                        // Never connected or connection failed
+                        console.log('WebSocket connection failed');
+                        reject(new Error('WebSocket connection failed'));
+                    }
+                };
+
+                // Set a timeout to fallback to HTTP if WebSocket takes too long to connect
+                const connectionTimeout = setTimeout(() => {
+                    if (!wsConnected) {
+                        console.log('WebSocket connection timeout');
+                        ws.close();
+                        reject(new Error('WebSocket connection timeout'));
+                    }
+                }, 5000);
+
+                // Clear timeout when connection is established
+                const originalOnOpen = ws.onopen;
+                ws.onopen = (event) => {
+                    clearTimeout(connectionTimeout);
+                    if (originalOnOpen) originalOnOpen.call(ws, event);
+                };
+
+                // Clear timeout on error as well
+                const originalOnError = ws.onerror;
+                ws.onerror = (event) => {
+                    clearTimeout(connectionTimeout);
+                    if (originalOnError) originalOnError.call(ws, event);
+                };
+
+            } catch (error) {
+                reject(error);
+            }
+        });
+    };
+
+    const handleHttpSend = async (conversationId: string, userPrompt: string, selectedModel: string) => {
+        try {
+            console.log('Using HTTP fallback for:', selectedModel);
+            
+            const response = await fetch(`http://127.0.0.1:8000/ChatResponse/${selectedModel}`, {
                 method: 'POST',
                 headers: {
                     "Content-Type": "application/json",
                 },
                 body: JSON.stringify({ 
-                    prompt: currentPrompt,
-                    thread_id: currentConversationId
+                    prompt: userPrompt,
+                    thread_id: conversationId
                 })
             });
 
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                throw new Error(`HTTP error! status: ${response.status} - ${response.statusText}`);
             }
 
-            // Handle simple JSON response instead of streaming
+            // Handle simple JSON response
             const data = await response.json();
-            let aiContent = data.response || 'Sorry, I couldn\'t process your request.';
+            let aiContent = data.response;
 
-            // Process the complete response for thinking content (DeepSeek)
+            // Validate response content
+            if (!aiContent || aiContent.trim().length === 0) {
+                throw new Error('Received empty response from server');
+            }
+
+            // Process the complete response for thinking content (both models)
             let thinkingContent = '';
             
-            if (model === 'DeepSeek' && aiContent) {
-                // Check if the response contains thinking tags
-                const thinkingMatch = aiContent.match(/<think>([\s\S]*?)<\/think>/);
-                if (thinkingMatch) {
-                    thinkingContent = thinkingMatch[1].trim();
-                    // Remove thinking tags from the main content
-                    aiContent = aiContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+            if (aiContent) {
+                if (selectedModel === 'DeepSeek') {
+                    // DeepSeek uses <think> tags
+                    const thinkingMatch = aiContent.match(/<think>([\s\S]*?)<\/think>/);
+                    if (thinkingMatch) {
+                        thinkingContent = thinkingMatch[1].trim();
+                        // Remove thinking tags from the main content
+                        aiContent = aiContent.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+                    }
+                } else if (selectedModel === 'Gemini') {
+                    // Gemini reasoning pattern detection
+                    const reasoningPatterns = [
+                        /Let me think about this step by step[.:]\s*([\s\S]*?)(?=\n\n|\nBased on|$)/i,
+                        /I need to consider[.:]\s*([\s\S]*?)(?=\n\n|\nTherefore|$)/i,
+                        /First, let me analyze[.:]\s*([\s\S]*?)(?=\n\n|\nIn conclusion|$)/i,
+                        /Thinking through this[.:]\s*([\s\S]*?)(?=\n\n|\nSo|$)/i
+                    ];
+                    
+                    for (const pattern of reasoningPatterns) {
+                        const match = aiContent.match(pattern);
+                        if (match) {
+                            thinkingContent = match[1].trim();
+                            // For Gemini, keep the reasoning in the main content
+                            break;
+                        }
+                    }
                 }
             }
 
             const aiMessage: Message = {
                 role: 'ai',
                 content: aiContent,
-                model: model,
+                model: selectedModel,
                 timestamp: new Date(),
                 isThinking: !!thinkingContent,
                 thinkingContent: thinkingContent || undefined
@@ -183,7 +541,7 @@ export default function Landing() {
 
             // Add AI response to current conversation
             setConversations(prev => prev.map(conv => 
-                conv.id === currentConversationId 
+                conv.id === conversationId 
                     ? { 
                         ...conv, 
                         messages: [...conv.messages, aiMessage],
@@ -191,28 +549,44 @@ export default function Landing() {
                     }
                     : conv
             ));
+
         } catch (error) {
-            console.error('Error:', error);
-            const errorMessage: Message = {
+            console.error('HTTP Error:', error);
+            
+            let errorMessage = 'Sorry, I encountered an error while processing your request. Please try again.';
+            
+            if (error instanceof TypeError && error.message.includes('fetch')) {
+                errorMessage = 'Sorry, I cannot connect to the server. Please check your connection and try again.';
+            } else if (error instanceof Error) {
+                if (error.message.includes('empty response')) {
+                    errorMessage = 'Sorry, I received an empty response. Please try rephrasing your question.';
+                } else if (error.message.includes('HTTP error')) {
+                    errorMessage = `Sorry, the server encountered an error (${error.message}). Please try again.`;
+                }
+            }
+            
+            const errorMsg: Message = {
                 role: 'ai',
-                content: 'Sorry, I encountered an error while processing your request. Please try again.',
-                model: model,
+                content: errorMessage,
+                model: selectedModel,
                 timestamp: new Date()
             };
             
             // Add error message to current conversation
             setConversations(prev => prev.map(conv => 
-                conv.id === currentConversationId 
+                conv.id === conversationId 
                     ? { 
                         ...conv, 
-                        messages: [...conv.messages, errorMessage],
+                        messages: [...conv.messages, errorMsg],
                         lastActivity: new Date()
                     }
                     : conv
             ));
+            throw error;
         } finally {
             setIsLoading(false);
             setIsThinking(false);
+            setIsStreaming(false);
         }
     };
 
@@ -221,6 +595,8 @@ export default function Landing() {
         setPrompt("");
         setIsLoading(false);
         setIsThinking(false);
+        setIsStreaming(false);
+        setWsConnectionStatus('disconnected');
     };
 
     const handleConversationSelect = (conversationId: string) => {
@@ -281,6 +657,15 @@ export default function Landing() {
                         </button>
                         <h1 className="text-xl font-semibold text-gray-800 dark:text-gray-200">
                             Nexus <span className="text-gradient">AI Chat</span>
+                            {wsConnectionStatus !== 'disconnected' && (
+                                <span className={`ml-2 text-xs px-2 py-1 rounded-full ${
+                                    wsConnectionStatus === 'connected' ? 'bg-green-100 text-green-800' :
+                                    wsConnectionStatus === 'connecting' ? 'bg-yellow-100 text-yellow-800' :
+                                    'bg-red-100 text-red-800'
+                                }`}>
+                                    {wsConnectionStatus}
+                                </span>
+                            )}
                         </h1>
                     </div>
                     <div className="flex items-center gap-4">
@@ -291,6 +676,7 @@ export default function Landing() {
                         >
                             {theme === 'dark' ? '🌞' : '🌙'}
                         </button>
+                        
                         <Dropdown 
                             selectedModel={model}
                             setSelectedModel={setModel}
@@ -364,11 +750,12 @@ export default function Landing() {
                                             timestamp={message.timestamp}
                                             isThinking={message.isThinking}
                                             thinkingContent={message.thinkingContent}
+                                            isStreaming={message.isStreaming}
                                         />
                                     </motion.div>
                                 ))}
                             </AnimatePresence>
-                            {(isLoading || isThinking) && (
+                            {(isLoading || isThinking) && !isStreaming && (
                                 <div className="flex justify-start">
                                     <div className="flex items-center gap-3 max-w-[80%]">
                                         <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
@@ -390,6 +777,18 @@ export default function Landing() {
                                                             <div className="w-2 h-2 bg-yellow-400 rounded-full animate-bounce"></div>
                                                             <div className="w-2 h-2 bg-yellow-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
                                                             <div className="w-2 h-2 bg-yellow-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                                                        </div>
+                                                    </>
+                                                ) : isStreaming ? (
+                                                    <>
+                                                        <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
+                                                        </svg>
+                                                        <span className="text-sm text-gray-600 dark:text-gray-400 font-medium">{model} is streaming...</span>
+                                                        <div className="flex space-x-1 ml-2">
+                                                            <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce"></div>
+                                                            <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                                                            <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
                                                         </div>
                                                     </>
                                                 ) : (
@@ -420,6 +819,7 @@ export default function Landing() {
                         onSend={handleSend}
                         isLoading={isLoading}
                         isThinking={isThinking}
+                        isStreaming={isStreaming}
                     />
                 </div>
             </div>

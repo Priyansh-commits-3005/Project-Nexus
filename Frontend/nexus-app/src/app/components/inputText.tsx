@@ -7,9 +7,10 @@ interface InputBoxProps {
     onSend: () => void;
     isLoading: boolean;
     isThinking?: boolean;
+    isStreaming?: boolean;
 }
 
-export default function InputBox({ prompt, setPrompt, onSend, isLoading, isThinking = false }: InputBoxProps) {
+export default function InputBox({ prompt, setPrompt, onSend, isLoading, isThinking = false, isStreaming = false }: InputBoxProps) {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     // Auto-resize textarea
@@ -24,7 +25,7 @@ export default function InputBox({ prompt, setPrompt, onSend, isLoading, isThink
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            if (prompt.trim() && !isLoading) {
+            if (prompt.trim() && !isLoading && !isStreaming) {
                 onSend();
             }
         }
@@ -41,23 +42,29 @@ export default function InputBox({ prompt, setPrompt, onSend, isLoading, isThink
                     placeholder={
                         isThinking 
                             ? "AI is thinking... Please wait" 
+                            : isStreaming
+                            ? "AI is responding... Please wait"
                             : "Type your message here... (Press Enter to send, Shift+Enter for new line)"
                     }
                     className="flex-1 min-h-[50px] max-h-[200px] p-4 bg-transparent border-none outline-none resize-none placeholder-gray-400 dark:placeholder-gray-500 text-gray-700 dark:text-gray-200 transition-colors duration-200"
-                    disabled={isLoading || isThinking}
+                    disabled={isLoading || isThinking || isStreaming}
                     rows={1}
                 />
                 <div className="p-2">
                     <button
                         onClick={onSend}
-                        disabled={!prompt.trim() || isLoading || isThinking}
+                        disabled={!prompt.trim() || isLoading || isThinking || isStreaming}
                         className="bg-violet-500 hover:bg-violet-600 disabled:bg-gray-300 dark:disabled:bg-gray-600 disabled:cursor-not-allowed text-white p-2 rounded-full transition-colors duration-200 flex items-center justify-center"
                     >
-                        {isLoading || isThinking ? (
+                        {isLoading || isThinking || isStreaming ? (
                             <div className="flex items-center gap-1">
                                 {isThinking ? (
                                     <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
                                         <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                                    </svg>
+                                ) : isStreaming ? (
+                                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
                                     </svg>
                                 ) : (
                                     <svg className="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24">

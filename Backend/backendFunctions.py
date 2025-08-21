@@ -3,16 +3,14 @@ This python script is for managing all the backend functions
 
 """
 
-import asyncio
 import os
-from dotenv import load_dotenv , dotenv_values
+from dotenv import load_dotenv, dotenv_values
 import ollama
 from langchain.chat_models import init_chat_model
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import START,StateGraph,MessagesState,END
-from langchain_core.prompts import ChatPromptTemplate,MessagesPlaceholder
-from langchain_core.messages import trim_messages
-import json
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import trim_messages, AIMessage
 
 from logging import Logger # to be implemented
 
@@ -63,65 +61,29 @@ nexusTrimmer = trim_messages(
 nexusGraphBuilder = StateGraph(state_schema=MessagesState)
 
 # make a function that takes the conversation history and calls the AI model.
-async def chatbot(state:MessagesState , config):
-    if(config['configurable']['model'] == 'Gemini'):
+async def chatbot(state: MessagesState, config):
+    # Step 2: Simplify the chatbot node - no streaming logic here
+    if config['configurable']['model'] == 'Gemini':
         llm = nexusGeminiModel
-            
     else:
         llm = nexusOllamaModel
-    trimmed_messages = nexusTrimmer.invoke(state['messages'] , token_counter =llm)
-    prompt = nexusPromptTemplate.invoke(
-        {'messages':trimmed_messages}
-    )
-    messages = await llm.ainvoke(prompt)
-    return{"messages":[messages]}
+        
+    # Trim messages for memory management
+    trimmed_messages = nexusTrimmer.invoke(state['messages'], token_counter=llm)
+    
+    # Step 1: Create the core chain - prompt template | llm
+    chain = nexusPromptTemplate | llm
+    
+    # Simple invoke to get the final result - streaming will be handled by astream_events
+    message = await chain.ainvoke({'messages': trimmed_messages})
+    
+    return {"messages": message}
+
+
+
+
         
 # making the graph
-nexusGraphBuilder.add_node("chatbot",chatbot)
-nexusGraphBuilder.add_edge(START , "chatbot")
-nexusGraphBuilder.add_edge("chatbot",END)
-
-
-
-
-
-
-
-
-
-#--------------------------------------Helper Functions----------------------------------
-async def streamTranslator(nexusStreamGen):
-    """
-    Convert LangGraph chunks to streaming format for the frontend
-    """
-    try:
-        async for chunks in nexusStreamGen:
-            # Check if chunk contains chatbot messages
-            if 'chatbot' in chunks and 'messages' in chunks['chatbot'] and chunks['chatbot']['messages']:
-                # Get the latest message from the chunk
-                latest_message = chunks['chatbot']['messages'][-1]
-                
-                # Check if it's an AI message and has content
-                if hasattr(latest_message, 'content') and latest_message.__class__.__name__ == 'AIMessage':
-                    content = latest_message.content
-                    
-                    # Split content into words for word-by-word streaming
-                    words = content.split()
-                    for i, word in enumerate(words):
-                        if i == 0:
-                            token = word
-                        else:
-                            token = " " + word
-                        
-                        response_data = {"response_token": token}
-                        yield f"data: {json.dumps(response_data)}\n\n"
-                        # Small delay between words for streaming effect
-                        await asyncio.sleep(0.1)
-                    
-                    # Signal end of message
-                    yield f"data: {json.dumps({'response_token': '', 'end': True})}\n\n"
-                
-    except Exception as e:
-        yield f"data: {json.dumps({'error': str(e)})}\n\n"
-            
-    
+nexusGraphBuilder.add_node("chatbot", chatbot)
+nexusGraphBuilder.add_edge(START, "chatbot")
+nexusGraphBuilder.add_edge("chatbot", END)
