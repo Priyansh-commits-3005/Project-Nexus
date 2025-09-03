@@ -210,3 +210,6 @@ __marimo__/
 # sqlite db files
 *.db
 checkpoints.*
+
+# Custom prompt files
+Backend/Prompt.txt
